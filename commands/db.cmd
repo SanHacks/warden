@@ -60,7 +60,7 @@ case "${WARDEN_PARAMS[0]}" in
     dump)
         if [[ "${DB_TYPE}" == "postgres" ]]; then
             PGPASSWORD="${POSTGRES_PASSWORD}" "$WARDEN_BIN" env exec -T db \
-                pg_dump -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" "${WARDEN_PARAMS[@]:1}" "$@"
+                pg_dump -U "${POSTGRES_USER}" "${POSTGRES_DB:-${POSTGRES_USER}}" "${WARDEN_PARAMS[@]:1}" "$@"
         else
             "$WARDEN_BIN" env exec -T db \
                 mysqldump -u"${MYSQL_USER}" -p"${MYSQL_PASSWORD}" "${MYSQL_DATABASE}" "${WARDEN_PARAMS[@]:1}" "$@"
