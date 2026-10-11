@@ -28,34 +28,29 @@ DB_ENV_OUTPUT="$(
     '
 )"
 
-DB_TYPE="mysql"
-if echo "${DB_ENV_OUTPUT}" | grep -q "^POSTGRES_"; then
-    DB_TYPE="postgres"
-fi
-
-eval "$(echo "${DB_ENV_OUTPUT}" | grep "^${DB_TYPE^^}_")"
+## determine the client commands to use based on the database distribution
+case "${MYSQL_DISTRIBUTION}" in
+    mariadb)
+        clientCmd="mariadb"
+        dumpCmd="mariadb-dump"
+        ;;
+    *)
+        clientCmd="mysql"
+        dumpCmd="mysqldump"
+        ;;
+esac
 
 ## sub-command execution
 case "${WARDEN_PARAMS[0]}" in
     connect)
-        if [[ "${DB_TYPE}" == "postgres" ]]; then
-            PGPASSWORD="${POSTGRES_PASSWORD}" "$WARDEN_BIN" env exec db \
-                psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" "${WARDEN_PARAMS[@]:1}" "$@"
-        else
-            "$WARDEN_BIN" env exec db \
-                mysql -u"${MYSQL_USER}" -p"${MYSQL_PASSWORD}" --database="${MYSQL_DATABASE}" "${WARDEN_PARAMS[@]:1}" "$@"
-        fi
+        "$WARDEN_BIN" env exec db \
+            "${clientCmd}" -u"${MYSQL_USER}" -p"${MYSQL_PASSWORD}" --database="${MYSQL_DATABASE}" "${WARDEN_PARAMS[@]:1}" "$@"
         ;;
     import)
-        if [[ "${DB_TYPE}" == "postgres" ]]; then
-            PGPASSWORD="${POSTGRES_PASSWORD}" "$WARDEN_BIN" env exec -T db \
-                psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" "${WARDEN_PARAMS[@]:1}" "$@"
-        else
-            LC_ALL=C sed -E 's/DEFINER[ ]*=[ ]*`[^`]+`@`[^`]+`/DEFINER=CURRENT_USER/g' \
-                | LC_ALL=C sed -E '/\@\@(GLOBAL\.GTID_PURGED|SESSION\.SQL_LOG_BIN)/d' \
-                | "$WARDEN_BIN" env exec -T db \
-                mysql -u"${MYSQL_USER}" -p"${MYSQL_PASSWORD}" --database="${MYSQL_DATABASE}" "${WARDEN_PARAMS[@]:1}" "$@"
-        fi
+        LC_ALL=C sed -E 's/DEFINER[ ]*=[ ]*`[^`]+`@`[^`]+`/DEFINER=CURRENT_USER/g' \
+            | LC_ALL=C sed -E '/\@\@(GLOBAL\.GTID_PURGED|SESSION\.SQL_LOG_BIN)/d' \
+            | "$WARDEN_BIN" env exec -T db \
+            "${clientCmd}" -u"${MYSQL_USER}" -p"${MYSQL_PASSWORD}" --database="${MYSQL_DATABASE}" "${WARDEN_PARAMS[@]:1}" "$@"
         ;;
     dump)
         if [[ "${DB_TYPE}" == "postgres" ]]; then
@@ -63,8 +58,20 @@ case "${WARDEN_PARAMS[0]}" in
                 pg_dump -U "${POSTGRES_USER}" "${POSTGRES_DB:-${POSTGRES_USER}}" "${WARDEN_PARAMS[@]:1}" "$@"
         else
             "$WARDEN_BIN" env exec -T db \
-                mysqldump -u"${MYSQL_USER}" -p"${MYSQL_PASSWORD}" "${MYSQL_DATABASE}" "${WARDEN_PARAMS[@]:1}" "$@"
-        fi
+            "${dumpCmd}" -u"${MYSQL_USER}" -p"${MYSQL_PASSWORD}" "${MYSQL_DATABASE}" "${WARDEN_PARAMS[@]:1}" "$@"
+        ;;
+    upgrade)
+            if [ "$MYSQL_DISTRIBUTION" == "mysql" ]; then
+                upgradeCmd="mysql_upgrade"
+            elif [ "$MYSQL_DISTRIBUTION" == "mariadb" ]; then
+                upgradeCmd="mariadb-upgrade"
+            else
+                fatal "The upgrade command only supports MySQL and MariaDB installations."
+                exit 1
+            fi
+
+            "$WARDEN_BIN" env exec -T db \
+            "${upgradeCmd}" -p"${MYSQL_ROOT_PASSWORD}"
         ;;
     *)
         fatal "The command \"${WARDEN_PARAMS[0]}\" does not exist. Please use --help for usage."
